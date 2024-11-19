@@ -1,38 +1,38 @@
-# Stage 1: Build the Rust project
-FROM rust:1.72-alpine AS builder
+# NB: This is not a production-grade Dockerfile.
 
-# Set the working directory
-WORKDIR /usr/src/app
+#################
+## build stage ##
+#################
+FROM rust:1-slim-bookworm AS builder
+WORKDIR /code
 
-# Install dependencies needed for building (alpine needs build tools)
-RUN apk add --no-cache musl-dev gcc libssl-dev
-
-# Copy Cargo.toml and Cargo.lock to cache dependencies first
-COPY Cargo.toml Cargo.lock ./
-
-# Fetch dependencies (this helps to cache dependencies if they don't change)
+# Download crates-io index and fetch dependency code.
+# This step avoids needing to spend time on every build downloading the index
+# which can take a long time within the docker context. Docker will cache it.
+RUN USER=root cargo init
+COPY Cargo.toml Cargo.toml
 RUN cargo fetch
 
-# Copy the source code and build the project
-COPY . .
+# copy app files
+COPY src src
 
-# Build the release version
+# compile app
 RUN cargo build --release
 
-# Stage 2: Create a minimal image to run the binary
-FROM alpine:latest
+###############
+## run stage ##
+###############
+FROM bitnami/minideb:bookworm
+WORKDIR /app
 
-# Install runtime dependencies (only what's needed for running the app)
-RUN apk add --no-cache libssl1.1
+# copy server binary from build stage
+COPY --from=builder /code/target/release/super-app super-app
 
-# Set the working directory
-WORKDIR /usr/src/app
+# set user to non-root unless root is required for your app
+USER 1001
 
-# Copy the compiled binary from the builder stage
-COPY --from=builder /usr/src/app/target/release/my-actix-app .
+# indicate what port the server is running on
+EXPOSE 8000
 
-# Expose the port the app runs on
-EXPOSE 8080
-
-# Run the compiled binary
-CMD ["./my-actix-app"]
+# run server
+CMD [ "/app/super-app" ]
